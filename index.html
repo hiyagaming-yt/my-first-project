@@ -1,358 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>Mini Snake.io — Single File</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<style>
-  html,body { height:100%; margin:0; background:#0b1220; color:#dfe7ff; font-family:Inter,system-ui,Segoe UI,Roboto,Arial; }
-  #ui { position:fixed; left:12px; top:12px; z-index:20; }
-  #ui .line { margin-bottom:6px; }
-  canvas { display:block; margin:0 auto; background: linear-gradient(180deg,#081020,#0e1a2a); box-shadow:0 6px 24px rgba(0,0,0,0.5); }
-  .hint { opacity:0.75; font-size:13px; }
-  #leader { position:fixed; right:12px; top:12px; background: rgba(255,255,255,0.04); padding:10px 12px; border-radius:8px; min-width:140px; }
-  #controls { position:fixed; left:12px; bottom:12px; font-size:13px; opacity:0.85; }
-  button { background:#1c2430; color:#dfe7ff; border:0; padding:8px 10px; border-radius:6px; cursor:pointer; }
-  button:hover { filter:brightness(1.1); }
-</style>
+  <meta charset="UTF-8">
+  <title>Snake.io 2P</title>
+  <style>
+    body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
+    canvas { background:#222; border:4px solid white; }
+    h1 { color:white; text-align:center; font-family:sans-serif; }
+  </style>
 </head>
 <body>
-<div id="ui">
-  <div class="line">Score: <span id="score">0</span></div>
-  <div class="line hint">Controls: Move mouse | Space = boost | R = respawn | P = pause</div>
-</div>
-<div id="leader"><b>Leaderboard</b><div id="leaders-list"></div></div>
-<div id="controls"><button id="restart">Restart</button></div>
-<canvas id="game" width="1000" height="700"></canvas>
+  <canvas id="game" width="800" height="600"></canvas>
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
 
-<script>
-/* ---- Snake.io-like single-file game ----
-   Author: ChatGPT (custom for you)
-   Save as snakeio.html and open in browser.
-*/
+    const grid = 20;
+    const speed = 150; // lower = faster
 
-(() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  let W = canvas.width, H = canvas.height;
-
-  // game state
-  let paused = false;
-  let mouse = { x: W/2, y: H/2, down:false };
-  let keys = {};
-  const scoreEl = document.getElementById('score');
-  const leadersEl = document.getElementById('leaders-list');
-  const restartBtn = document.getElementById('restart');
-
-  // tuning
-  const NUM_BOTS = 8;
-  const PELLET_COUNT = 120;
-  const PELLET_RADIUS = 3;
-  const START_LENGTH = 36;      // starting body points
-  const SEG_SPACING = 6;        // pixels between body segments
-  const PLAYER_SPEED = 2.2;
-  const BOOST_MULT = 2.2;
-  const BOOST_DRAIN = 0.9;      // per frame
-  const BOOST_RECOVER = 0.6;    // per frame
-  const MAX_BOOST = 100;
-
-  // utilities
-  function rand(a,b){ return Math.random()*(b-a)+a; }
-  function dist(a,b,c,d){ const dx=a-c, dy=b-d; return Math.hypot(dx,dy); }
-  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-
-  // pellet class (food)
-  class Pellet {
-    constructor(x,y){
-      this.x = x; this.y = y;
-      this.radius = PELLET_RADIUS;
-      this.color = `hsl(${~~rand(160,280)}, 70%, 60%)`;
-    }
-    draw(){
-      ctx.beginPath();
-      ctx.fillStyle = this.color;
-      ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
-      ctx.fill();
-    }
-  }
-
-  // snake class (player & bots)
-  class Snake {
-    constructor(x,y,color,name,ai=false){
-      this.x = x; this.y = y;
-      this.color = color;
-      this.name = name || 'anon';
-      this.segments = []; // segment positions (head first)
-      this.dirAngle = rand(0,Math.PI*2);
-      this.speed = PLAYER_SPEED;
-      this.alive = true;
-      this.ai = ai;
-      this.boost = MAX_BOOST;
-      this.score = START_LENGTH;
-      this.target = null; // for bots
-      this.initBody();
-    }
-    initBody(){
-      this.segments = [];
-      for(let i=0;i<START_LENGTH;i++){
-        this.segments.push({x: this.x - i*SEG_SPACING, y: this.y});
+    // Snake class
+    class Snake {
+      constructor(x, y, color, controls) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.body = [{x:this.x, y:this.y}];
+        this.dx = 1; this.dy = 0;
+        this.controls = controls;
+        this.alive = true;
       }
-    }
-    head(){ return this.segments[0]; }
-    update(dt){
-      if(!this.alive) return;
-
-      // steering
-      if(this.ai){
-        this.updateAI(dt);
-      } else {
-        // player: aim to mouse
-        const hx = this.head().x, hy = this.head().y;
-        const angle = Math.atan2(mouse.y - hy, mouse.x - hx);
-        // smooth turning
-        const diff = angle - this.dirAngle;
-        this.dirAngle += clamp(diff, -0.14, 0.14);
-      }
-
-      // speed & boost
-      const boosting = (!this.ai && (keys[' '] || mouse.down)) || (this.ai && this.wantsBoost);
-      let sp = this.speed * (boosting ? BOOST_MULT : 1);
-      if(boosting){
-        this.boost = Math.max(0, this.boost - BOOST_DRAIN);
-        if(this.boost <= 0) sp = this.speed;
-      } else {
-        this.boost = Math.min(MAX_BOOST, this.boost + BOOST_RECOVER);
-      }
-
-      // move head
-      const hx = this.head().x + Math.cos(this.dirAngle) * sp;
-      const hy = this.head().y + Math.sin(this.dirAngle) * sp;
-      this.segments.unshift({x: hx, y: hy});
-
-      // trim to length proportional to score
-      const targetLen = Math.max(6, Math.floor(this.score));
-      while(this.segments.length > targetLen) this.segments.pop();
-
-      // keep inside bounds (wrap-around world)
-      const wrapMargin = 6;
-      let h = this.head();
-      if(h.x < -wrapMargin) h.x = W + wrapMargin;
-      if(h.x > W + wrapMargin) h.x = -wrapMargin;
-      if(h.y < -wrapMargin) h.y = H + wrapMargin;
-      if(h.y > H + wrapMargin) h.y = -wrapMargin;
-    }
-
-    updateAI(dt){
-      // simple behavior: wander, occasionally chase pellet or avoid large snakes
-      if(!this.target || Math.random() < 0.01){
-        // pick a pellet or random point
-        if(Math.random() < 0.6 && pellets.length){
-          this.target = pellets[Math.floor(rand(0,pellets.length))];
-        } else {
-          this.target = {x: rand(20, W-20), y: rand(20, H-20)};
+      draw() {
+        ctx.fillStyle = this.color;
+        for (let part of this.body) {
+          ctx.fillRect(part.x * grid, part.y * grid, grid-2, grid-2);
         }
       }
-      // aim toward target
-      const hx = this.head().x, hy = this.head().y;
-      const angle = Math.atan2(this.target.y - hy, this.target.x - hx);
-      const diff = angle - this.dirAngle;
-      this.dirAngle += clamp(diff, -0.08, 0.08);
-
-      // occasionally boost if pellet near
-      this.wantsBoost = false;
-      if(this.target && dist(hx,hy,this.target.x,this.target.y) < 140 && this.boost > 8){
-        this.wantsBoost = true;
-      }
-    }
-
-    draw(){
-      if(!this.alive) return;
-      // body glow
-      ctx.beginPath();
-      for(let i=0;i<this.segments.length;i++){
-        const s = this.segments[i];
-        const r = Math.max(2, 8 - i*0.08);
-        ctx.fillStyle = i==0 ? '#fff' : this.color;
-        ctx.globalAlpha = i==0 ? 1 : clamp(1 - i/this.segments.length, 0.08, 0.95);
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, r, 0, Math.PI*2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-
-      // name and boost bar above head
-      const h = this.head();
-      ctx.fillStyle = "#fff";
-      ctx.font = "12px sans-serif";
-      ctx.fillText(this.name, h.x - 18, h.y - 22);
-
-      // boost meter
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
-      ctx.fillRect(h.x - 20, h.y - 18, 40, 5);
-      ctx.fillStyle = "rgba(120,200,255,0.95)";
-      ctx.fillRect(h.x - 20, h.y - 18, 40 * (this.boost / MAX_BOOST), 5);
-    }
-
-    eatPellet(p){
-      this.score += 0.6 + Math.random()*0.9;
-    }
-
-    die(){
-      this.alive = false;
-      // turn body into pellets on death
-      for(let i=0;i<this.segments.length; i+=4){
-        const s = this.segments[i];
-        if(s) pellets.push(new Pellet(s.x + rand(-4,4), s.y + rand(-4,4)));
-      }
-      this.segments = [];
-    }
-  }
-
-  // world
-  let pellets = [];
-  let snakes = [];
-  let player;
-
-  function spawnPellets(n){
-    while(pellets.length < n){
-      pellets.push(new Pellet(rand(8, W-8), rand(8, H-8)));
-    }
-  }
-
-  function resetGame(){
-    pellets = [];
-    snakes = [];
-    player = new Snake(W/2, H/2, 'hsl(200,80%,65%)', 'YOU', false);
-    player.score = START_LENGTH + 6;
-    // spawn bots
-    for(let i=0;i<NUM_BOTS;i++){
-      const s = new Snake(rand(40, W-40), rand(40, H-40),
-                          `hsl(${~~rand(0,360)},70%,60%)`, 'BOT'+(i+1), true);
-      s.score = START_LENGTH + rand(-6, 30);
-      snakes.push(s);
-    }
-    snakes.unshift(player);
-    spawnPellets(PELLET_COUNT);
-  }
-
-  // simple collision: head vs body points (point-sphere)
-  function checkCollisions(){
-    // head of each alive snake vs pellets & all snake bodies
-    for(const s of snakes){
-      if(!s.alive) continue;
-      // pellets
-      for(let i=pellets.length-1;i>=0;i--){
-        const p = pellets[i];
-        if(dist(s.head().x, s.head().y, p.x, p.y) < (PELLET_RADIUS + 8)){
-          pellets.splice(i,1);
-          s.eatPellet(p);
+      move() {
+        if (!this.alive) return;
+        let head = {x: this.body[0].x + this.dx, y: this.body[0].y + this.dy};
+        // Wrap around edges
+        if (head.x < 0) head.x = canvas.width / grid - 1;
+        if (head.x >= canvas.width / grid) head.x = 0;
+        if (head.y < 0) head.y = canvas.height / grid - 1;
+        if (head.y >= canvas.height / grid) head.y = 0;
+        // Check collision with self
+        for (let part of this.body) {
+          if (head.x === part.x && head.y === part.y) this.alive = false;
         }
+        this.body.unshift(head);
+        this.body.pop(); // move forward
       }
-      // head vs bodies (including own body after a short safe zone)
-      const head = s.head();
-      // check collision with other snakes' segments
-      for(const t of snakes){
-        if(!t.alive) continue;
-        for(let k= (t===s? 8 : 0); k<t.segments.length; k++){ // self-collision ignore first few segments
-          const seg = t.segments[k];
-          if(dist(head.x, head.y, seg.x, seg.y) < 6){
-            // death if hit a segment (if you hit your own immediate neck ignore)
-            if(t === s && k < 6) continue;
-            s.die();
-            return;
-          }
+      grow() {
+        let tail = this.body[this.body.length-1];
+        this.body.push({...tail});
+      }
+    }
+
+    // Controls
+    const p1Controls = {up:"w", down:"s", left:"a", right:"d"};
+    const p2Controls = {up:"ArrowUp", down:"ArrowDown", left:"ArrowLeft", right:"ArrowRight"};
+
+    const p1 = new Snake(5, 5, "lime", p1Controls);
+    const p2 = new Snake(30, 20, "cyan", p2Controls);
+
+    let food = {x: 10, y: 10};
+
+    function spawnFood() {
+      food.x = Math.floor(Math.random() * (canvas.width / grid));
+      food.y = Math.floor(Math.random() * (canvas.height / grid));
+    }
+
+    function drawFood() {
+      ctx.fillStyle = "red";
+      ctx.fillRect(food.x * grid, food.y * grid, grid-2, grid-2);
+    }
+
+    // Controls listener
+    document.addEventListener("keydown", e => {
+      [p1, p2].forEach(player => {
+        if (e.key === player.controls.up && player.dy === 0) {player.dx=0; player.dy=-1;}
+        if (e.key === player.controls.down && player.dy === 0) {player.dx=0; player.dy=1;}
+        if (e.key === player.controls.left && player.dx === 0) {player.dx=-1; player.dy=0;}
+        if (e.key === player.controls.right && player.dx === 0) {player.dx=1; player.dy=0;}
+      });
+    });
+
+    function update() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Move snakes
+      p1.move(); p2.move();
+
+      // Check food eaten
+      [p1, p2].forEach(player => {
+        if (player.alive && player.body[0].x === food.x && player.body[0].y === food.y) {
+          player.grow();
+          spawnFood();
         }
+      });
+
+      // Draw snakes + food
+      drawFood();
+      p1.draw(); p2.draw();
+
+      // Draw score
+      ctx.fillStyle="white"; ctx.font="20px Arial";
+      ctx.fillText(`P1 Length: ${p1.body.length}`, 10, 20);
+      ctx.fillText(`P2 Length: ${p2.body.length}`, 650, 20);
+
+      // Game Over check
+      if (!p1.alive || !p2.alive) {
+        ctx.fillStyle="yellow"; ctx.font="40px Arial";
+        if (!p1.alive && !p2.alive) ctx.fillText("Draw!", 340, 300);
+        else if (!p1.alive) ctx.fillText("Player 2 Wins!", 280, 300);
+        else ctx.fillText("Player 1 Wins!", 280, 300);
+        return;
       }
+
+      setTimeout(update, speed);
     }
-  }
 
-  // leaderboard (sort by score)
-  function updateLeaders(){
-    const sorted = snakes.slice().filter(s=>s.alive).sort((a,b)=>b.score - a.score).slice(0,6);
-    leadersEl.innerHTML = sorted.map(s=>`<div>${s.name}: ${Math.floor(s.score)}</div>`).join('');
-  }
-
-  // main loop
-  let last = performance.now();
-  function loop(now){
-    if(paused){ last = now; requestAnimationFrame(loop); return; }
-    const dt = Math.min(40, now - last) / 16.666; // normalized
-    last = now;
-
-    // update snakes
-    for(const s of snakes) s.update(dt);
-    // collisions & pellet refill
-    checkCollisions();
-    spawnPellets(PELLET_COUNT);
-
-    // render
-    ctx.clearRect(0,0,W,H);
-
-    // subtle grid (like paper.io)
-    ctx.globalAlpha = 0.05;
-    ctx.strokeStyle = "#ffffff";
-    for(let x=0;x<W;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
-    for(let y=0;y<H;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-    ctx.globalAlpha = 1;
-
-    // pellets
-    for(const p of pellets) p.draw();
-
-    // draw snakes sorted so bigger ones behind or front
-    const drawOrder = snakes.slice().sort((a,b)=>a.score - b.score);
-    for(const s of drawOrder) s.draw();
-
-    // HUD
-    scoreEl.textContent = Math.floor(player.score);
-
-    updateLeaders();
-
-    requestAnimationFrame(loop);
-  }
-
-  // input
-  canvas.addEventListener('mousemove', (e)=>{
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    mouse.y = (e.clientY - rect.top) * (canvas.height / rect.height);
-  });
-  canvas.addEventListener('mousedown', ()=>{ mouse.down = true; });
-  canvas.addEventListener('mouseup', ()=>{ mouse.down = false; });
-  window.addEventListener('keydown', (e)=>{ keys[e.key] = true; if(e.key==='p'){ paused = !paused; } if(e.key==='r'){ restart(); } });
-  window.addEventListener('keyup', (e)=>{ keys[e.key] = false; });
-
-  function restart(){ resetGame(); paused = false; last = performance.now(); }
-  restartBtn.onclick = restart;
-
-  // responsive
-  function resizeCanvas(){
-    const scale = Math.min(window.innerWidth - 40, 1200);
-    canvas.width = Math.max(700, scale);
-    canvas.height = Math.max(500, window.innerHeight - 120);
-    W = canvas.width; H = canvas.height;
-    resetGame();
-  }
-  window.addEventListener('resize', resizeCanvas);
-  resizeCanvas();
-
-  // initial spawn and loop start
-  resetGame();
-  requestAnimationFrame(loop);
-
-  // small helpful tips for keyboard steering fallback
-  // if user presses arrow keys or WASD combine with mouse direction
-  window.addEventListener('keydown', (e) => {
-    if(['ArrowUp','w','a','s','d','ArrowLeft','ArrowRight','ArrowDown'].includes(e.key)){
-      // move player dirAngle manually if keys used
-      if(e.key === 'ArrowUp' || e.key === 'w'){ player.dirAngle = -Math.PI/2; }
-      if(e.key === 'ArrowDown' || e.key === 's'){ player.dirAngle = Math.PI/2; }
-      if(e.key === 'ArrowLeft' || e.key === 'a'){ player.dirAngle = Math.PI; }
-      if(e.key === 'ArrowRight' || e.key === 'd'){ player.dirAngle = 0; }
-    }
-    if(e.key === ' '){ /* boosting toggled by key state handled in update */ }
-  });
-
-})();
-</script>
+    spawnFood();
+    update();
+  </script>
 </body>
 </html>
